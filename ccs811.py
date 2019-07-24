@@ -32,131 +32,122 @@ CSS811_ERROR_ID = 0xE0
 CSS811_APP_START = 0xF4
 CSS811_SW_RESET = 0xFF
 
+def __init__(self):
+    self.pi = pigpio.pi()
+    self.device = self.pi.i2c_open(1, CCS811_ADDR)
+    self.tVOC = 0
+    self.CO2 = 0
 
-class CCS811:
-    def __init__(self):
-        self.pi = pigpio.pi()
-        self.device = self.pi.i2c_open(1, CCS811_ADDR)
-        self.tVOC = 0
-        self.CO2 = 0
+def print_error(self):
+    error = self.pi.i2c_read_byte_data(self.device, CSS811_ERROR_ID)
+    message = 'Error: '
 
-    def print_error(self):
-        error = self.pi.i2c_read_byte_data(self.device, CSS811_ERROR_ID)
-        message = 'Error: '
+    if error & 1 << 5:
+        message += 'HeaterSupply '
+    elif error & 1 << 4:
+        message += 'HeaterFault '
+    elif error & 1 << 3:
+        message += 'MaxResistance '
+    elif error & 1 << 2:
+        message += 'MeasModeInvalid '
+    elif error & 1 << 1:
+        message += 'ReadRegInvalid '
+    elif error & 1 << 0:
+        message += 'MsgInvalid '
 
-        if error & 1 << 5:
-            message += 'HeaterSupply '
-        elif error & 1 << 4:
-            message += 'HeaterFault '
-        elif error & 1 << 3:
-            message += 'MaxResistance '
-        elif error & 1 << 2:
-            message += 'MeasModeInvalid '
-        elif error & 1 << 1:
-            message += 'ReadRegInvalid '
-        elif error & 1 << 0:
-            message += 'MsgInvalid '
+    print(message)
 
-        print(message)
+def check_for_error(self):
+    value = self.pi.i2c_read_byte_data(self.device, CSS811_STATUS)
+    return value & 1 << 0
 
-    def check_for_error(self):
-        value = self.pi.i2c_read_byte_data(self.device, CSS811_STATUS)
-        return value & 1 << 0
+def app_valid(self):
+    value = self.pi.i2c_read_byte_data(self.device, CSS811_STATUS)
+    return value & 1 << 4
 
-    def app_valid(self):
-        value = self.pi.i2c_read_byte_data(self.device, CSS811_STATUS)
-        return value & 1 << 4
+def set_drive_mode(self, mode):
+    if mode > 4:
+        mode = 4
 
-    def set_drive_mode(self, mode):
-        if mode > 4:
-            mode = 4
+    setting = self.pi.i2c_read_byte_data(self.device, CSS811_MEAS_MODE)
+    setting &= ~(0b00000111 << 4)
+    setting |= (mode << 4)
+    self.pi.i2c_write_byte_data(self.device, CSS811_MEAS_MODE, setting)
 
-        setting = self.pi.i2c_read_byte_data(self.device, CSS811_MEAS_MODE)
-        setting &= ~(0b00000111 << 4)
-        setting |= (mode << 4)
-        self.pi.i2c_write_byte_data(self.device, CSS811_MEAS_MODE, setting)
+def configure_ccs811(self):
+    hardware_id = self.pi.i2c_read_byte_data(self.device, CSS811_HW_ID)
 
-    def configure_ccs811(self):
-        hardware_id = self.pi.i2c_read_byte_data(self.device, CSS811_HW_ID)
+    if hardware_id != 0x81:
+        raise ValueError('CCS811 not found. Please check wiring.')
 
-        if hardware_id != 0x81:
-            raise ValueError('CCS811 not found. Please check wiring.')
+    if self.check_for_error():
+        self.print_error()
+        raise ValueError('Error at Startup.')
 
-        if self.check_for_error():
+    if not self.app_valid():
+        raise ValueError('Error: App not valid.')
+
+    self.pi.i2c_write_byte(self.device, CSS811_APP_START)
+
+    if self.check_for_error():
+        self.print_error()
+        raise ValueError('Error at AppStart.')
+
+    self.set_drive_mode(1)
+
+    if self.check_for_error():
+        self.print_error()
+        raise ValueError('Error at setDriveMode.')
+
+def setup(self):
+    print('Starting CCS811 Read')
+    self.configure_ccs811()
+
+    result = self.get_base_line()
+
+    print("baseline for this sensor: 0x")
+    if result < 0x100:
+        print('0')
+    if result < 0x10:
+        print('0')
+    print(result)
+
+def get_base_line(self):
+    a, b = self.pi.i2c_read_i2c_block_data(self.device, CSS811_BASELINE, 2)
+    baselineMSB = b[0]
+    baselineLSB = b[1]
+    baseline = (baselineMSB << 8) | baselineLSB
+    return baseline
+
+def data_available(self):
+    value = self.pi.i2c_read_byte_data(self.device, CSS811_STATUS)
+    return value & 1 << 3
+
+def run(self):
+
+    self.setup()
+
+    while True:
+        if self.data_available():
+            self.read_logorithm_results()
+
+            print("CO2[%d] tVOC[%d]" % (self.CO2, self.tVOC))
+
+        elif self.check_for_error():
             self.print_error()
-            raise ValueError('Error at Startup.')
 
-        if not self.app_valid():
-            raise ValueError('Error: App not valid.')
+        time.sleep(1)
 
-        self.pi.i2c_write_byte(self.device, CSS811_APP_START)
+def read_logorithm_results(self):
+    b, d = self.pi.i2c_read_i2c_block_data(self.device, CSS811_ALG_RESULT_DATA, 4)
 
-        if self.check_for_error():
-            self.print_error()
-            raise ValueError('Error at AppStart.')
+    co2MSB = d[0]
+    co2LSB = d[1]
+    tvocMSB = d[2]
+    tvocLSB = d[3]
 
-        self.set_drive_mode(1)
+    self.CO2 = (co2MSB << 8) | co2LSB
+    self.tVOC = (tvocMSB << 8) | tvocLSB
 
-        if self.check_for_error():
-            self.print_error()
-            raise ValueError('Error at setDriveMode.')
-
-    def setup(self):
-        print('Starting CCS811 Read')
-        self.configure_ccs811()
-
-        result = self.get_base_line()
-
-        print("baseline for this sensor: 0x")
-        if result < 0x100:
-            print('0')
-        if result < 0x10:
-            print('0')
-        print(result)
-
-    def get_base_line(self):
-        a, b = self.pi.i2c_read_i2c_block_data(self.device, CSS811_BASELINE, 2)
-        baselineMSB = b[0]
-        baselineLSB = b[1]
-        baseline = (baselineMSB << 8) | baselineLSB
-        return baseline
-
-    def data_available(self):
-        value = self.pi.i2c_read_byte_data(self.device, CSS811_STATUS)
-        return value & 1 << 3
-
-    def run(self):
-
-        self.setup()
-
-        while True:
-            if self.data_available():
-                self.read_logorithm_results()
-
-                print("CO2[%d] tVOC[%d]" % (self.CO2, self.tVOC))
-
-            elif self.check_for_error():
-                self.print_error()
-
-            time.sleep(1)
-
-    def read_logorithm_results(self):
-        b, d = self.pi.i2c_read_i2c_block_data(self.device, CSS811_ALG_RESULT_DATA, 4)
-
-        co2MSB = d[0]
-        co2LSB = d[1]
-        tvocMSB = d[2]
-        tvocLSB = d[3]
-
-        self.CO2 = (co2MSB << 8) | co2LSB
-        self.tVOC = (tvocMSB << 8) | tvocLSB
-
-
-    def main():
-        while True:
-            c = CCS811()
-            c.run()
-   
 if __name__=="__main__":
-   main()
-
+    run()
