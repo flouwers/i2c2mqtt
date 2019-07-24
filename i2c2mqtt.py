@@ -21,6 +21,7 @@
 import bh1750
 import bme280
 import si7021
+import ccs811
 import time, json, argparse
 import paho.mqtt.publish as publish # pip install paho-mqtt
 
@@ -65,6 +66,18 @@ def getI2cSensors(devices):
     debug ("Temperature : " + str(newObject['temp']) + " °C")
     debug ("Humidity : " + str(newObject['hum']) + " %")
     debug ("Pressure : " + str(newObject['pres']) + " hPa")
+    
+  if 'ccs811' in devices:
+    # Get VOC & CO2 values from CCS811
+    ccs811.setup()
+    if ccs811.data_available():
+        co2, tvoc = ccs811.read_logorithm_results()
+    elif self.check_for_error():
+        self.print_error()
+    newObject['co2'] = int (co2)
+    newObject['tvoc'] = int (tvoc)
+    debug ("CO2 : " + str(newObject['co2']) + " ppm")
+    debug ("VOC : " + str(newObject['tvoc']) + " ppm")
 
   return (True, newObject)
 
