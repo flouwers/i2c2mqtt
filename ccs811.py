@@ -152,5 +152,11 @@ class CCS811:
         self.tVOC = (tvocMSB << 8) | tvocLSB
 
 
-c = CCS811()
-c.run()
+    def main():
+        while True:
+            c = CCS811()
+            c.run()
+   
+if __name__=="__main__":
+   main()
+
