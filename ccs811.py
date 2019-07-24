@@ -123,7 +123,7 @@ def data_available(self):
     value = self.pi.i2c_read_byte_data(self.device, CSS811_STATUS)
     return value & 1 << 3
 
-def run(self):
+def main(self):
 
     self.setup()
 
@@ -150,4 +150,4 @@ def read_logorithm_results(self):
     self.tVOC = (tvocMSB << 8) | tvocLSB
 
 if __name__=="__main__":
-    run()
+    main()
