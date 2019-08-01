@@ -19,67 +19,56 @@
 #
 
 import bh1750
-import bme280
-import si7021
+#import bme280
+#import si7021
 import ccs811
 import time, json, argparse
 import paho.mqtt.publish as publish # pip install paho-mqtt
+import paho.mqtt.client as mqtt
 
 verbose = False
+ccs811setup = False
 
 def debug(msg):
   if verbose:
     print (msg + "\n")
 
-def getI2cSensors(devices):
-  tstamp = int(time.time())
+def getbh1750():
+  # Drop the first (usually bad)
+  lux = bh1750.readLight()
+  lux = bh1750.readLight()
+  return lux
 
-  newObject = {"time": tstamp}
+def getsi7021():
+  T = si7021.readTemperature()
+  RH = si7021.readHumidity()
+  return T,RH
 
-  if not isinstance(devices, list):
-    newObject['message'] = 'No devices specified.'
-    return (False, newObject)
+def getbme280():
+  T, P, RH = bme280.readBME280All()
+  return T, P, RH
 
-  if 'bh1750' in devices:
-    ###### Get luminosity ##
-    lux = bh1750.readLight()
-    # Drop the first (usually bad)
-    lux = bh1750.readLight()
-    newObject['lum'] = int (lux)
-    debug ("Light Level : " + str(newObject['lum']) + " lx")
-
-  if 'si7021' in devices:
-    ###### Get temperature & humidity from si7021 ##
-    T = si7021.readTemperature()
-    newObject['temp'] = round (T, 1)
-    RH = si7021.readHumidity()
-    newObject['hum'] = int (RH)
-    debug ("Temperature : " + str(newObject['temp']) + " °C")
-    debug ("Humidity : " + str(newObject['hum']) + " %")
-
-  if 'bme280' in devices:
-    ###### Get temperature, pressure & humidity from bme280 ##
-    T, P, RH = bme280.readBME280All()
-    newObject['temp'] = round (T, 1)
-    newObject['hum'] = int (RH)
-    newObject['pres'] = int(P)
-    debug ("Temperature : " + str(newObject['temp']) + " °C")
-    debug ("Humidity : " + str(newObject['hum']) + " %")
-    debug ("Pressure : " + str(newObject['pres']) + " hPa")
-    
-  if 'ccs811' in devices:
-    # Get VOC & CO2 values from CCS811
+def getccs811():
+  global ccs811setup
+  if not ccs811setup:
     ccs811.setup()
-    if ccs811.data_available():
-        co2, tvoc = ccs811.read_logorithm_results()
-    elif self.check_for_error():
-        self.print_error()
-    newObject['co2'] = int (co2)
-    newObject['tvoc'] = int (tvoc)
-    debug ("CO2 : " + str(newObject['co2']) + " ppm")
-    debug ("VOC : " + str(newObject['tvoc']) + " ppm")
+    ccs811setup = True
+  if ccs811.data_available():
+    co2, tvoc = ccs811.read_logorithm_results()
+  elif self.check_for_error():
+    self.print_error()
+  return co2, tvoc
 
-  return (True, newObject)
+def setupMqtt(broker_address):
+  print("creating new instance")
+  client = mqtt.Client("P1") #create new instance
+  print("connecting to broker")
+  client.connect(broker_address) #connect to broker
+
+def publishMqtt(topic, message):
+  print("Publishing message", message," to topic ", topic)
+  client.publish(topic,message)
+
 
 parser = argparse.ArgumentParser(description='Read current temperature,illuminance and humidity from i2c sensors and send them to a MQTT broker.',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -99,13 +88,42 @@ parser.add_argument('-v', '--verbose', dest='verbose', action="store_true", defa
 args = parser.parse_args()
 verbose = args.verbose;
 
-status, data = getI2cSensors(args.devices)
-jsonString = json.dumps(data)
-if status:
-  debug("Success with message (for current readings) <{0}>".format(jsonString))
-  if not args.dryRun:
-    publish.single(args.topic, jsonString, hostname=args.host)
-else:
-  debug("Failure with message <{0}>".format(jsonString))
-  if not args.dryRun:
-    publish.single(args.topicError, jsonString, hostname=args.host)
+
+setupMqtt(args.host)
+
+while (True):
+  if not isinstance(args.devices, list):
+    print ("No devices specified")
+    exit()
+
+  if 'bh1750' in args.devices:
+    lux = getbh1750()
+    publishMqtt(args.topic , "/bh1750", lux)
+
+  if 'si7021' in args.devices:
+    t, rh = getsi7021()
+    publishMqtt(args.topic + "/si7021", t)
+    publishMqtt(args.topic + "/si7021", rh)
+
+  if 'bme280' in args.devices:
+    t, p, rh = getbme280()
+    publishMqtt(args.topic + "/bme280", t)
+    publishMqtt(args.topic + "/bme280", p)
+    publishMqtt(args.topic + "/bme280", rh)
+
+  if 'ccs811' in args.devices:
+    co2, tvoc = getccs811()
+    publishMqtt(args.topic + "/ccs811", co2)
+    publishMqtt(args.topic + "/ccs811", tvoc)
+
+
+
+#if status:
+#  debug("Success with message (for current readings) <{0}>".format(jsonString))
+##  if not args.dryRun:
+#    publish.single(args.topic, jsonString, hostname=args.host)
+#else:
+#  debug("Failure with message <{0}>".format(jsonString))
+#  if not args.dryRun:
+#    publish.single(args.topicError, jsonString, hostname=args.host)
+
